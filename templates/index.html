@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FastMap - Real-Time Sensor Network</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: "Inter", sans-serif;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #map-container {
+            height: 100vh;
+            flex-grow: 1;
+            position: relative;
+
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Leaflet DivIcon styling */
+        .leaflet-div-icon {
+            background: transparent !important;
+            border: none !important;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .sensor-icon-wrapper {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s ease-in-out;
+        }
+
+        .sensor-icon-wrapper:hover {
+            transform: scale(1.1);
+        }
+
+        .status-NORMAL {
+            background-color: #4CAF50;
+            /* Green */
+            color: white;
+            border: 2px solid #388E3C;
+        }
+
+        .status-ANOMALY {
+            background-color: #F44336;
+            /* Red */
+            color: white;
+            border: 2px solid #D32F2F;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.7);
+            }
+
+            70% {
+                transform: scale(1.1);
+                box-shadow: 0 0 0 10px rgba(244, 67, 54, 0);
+            }
+
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(244, 67, 54, 0);
+            }
+        }
+
+        /* Pop-up styling */
+        .leaflet-popup-content-wrapper {
+            border-radius: 0.5rem;
+            padding: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        .leaflet-popup-content {
+            font-family: "Inter", sans-serif;
+            font-size: 0.9rem;
+        }
+
+        .leaflet-popup-content h4 {
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+
+        .leaflet-popup-content p {
+            margin-bottom: 0.3rem;
+            color: #555;
+        }
+
+        .leaflet-popup-content .status-NORMAL {
+            color: #28A745;
+            font-weight: 600;
+        }
+
+        .leaflet-popup-content .status-ANOMALY {
+            color: #DC3545;
+            font-weight: 600;
+        }
+
+        .leaflet-popup-content .last-updated {
+            font-size: 0.8rem;
+            color: #777;
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+
+<body class="flex flex-col min-h-screen bg-gray-50">
+    <!-- Header -->
+    <header class="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-4 shadow-md z-10">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-3xl font-extrabold tracking-tight">FastMap</h1>
+            <nav>
+                <ul class="flex space-x-6">
+                    <li><a href="#" class="hover:text-blue-200 transition duration-300">Dashboard</a></li>
+                    <li><a href="#" class="hover:text-blue-200 transition duration-300">Analytics</a></li>
+                    <li><a href="#" class="hover:text-blue-200 transition duration-300">Settings</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex flex-grow overflow-hidden">
+        <!-- Sensor Panel Sidebar -->
+        <aside id="sensor-panel" class="w-full md:w-1/4 bg-white p-6 shadow-lg overflow-y-auto">
+            <h2 class="text-2xl font-bold mb-6 text-gray-800 border-b pb-3">Sensor Overview</h2>
+            <div id="sensor-list" class="space-y-4">
+                <!-- Sensor items will be injected here by JavaScript -->
+            </div>
+            <!-- Loading indicator for sidebar -->
+            <div id="sidebar-loading" class="text-center text-gray-500 mt-8">
+                <p>Loading sensor list...</p>
+                <div class="spinner mt-4 mx-auto w-8 h-8 rounded-full border-4 border-t-4 border-gray-200 animate-spin">
+                </div>
+            </div>
+        </aside>
+
+        <!-- Map Container -->
+        <div id="map-container" class="relative">
+            <div id="map" class="rounded-l-lg shadow-inner"></div>
+            <!-- Loading Overlay for Map -->
+            <div id="map-loading-overlay"
+                class="absolute inset-0 bg-white bg-opacity-90 flex flex-col items-center justify-center rounded-l-lg z-20 transition-opacity duration-300">
+                <div class="spinner w-12 h-12 rounded-full border-4 border-t-4 border-blue-500 animate-spin"></div>
+                <p class="text-blue-700 text-xl mt-4">Loading map data...</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Initialize Leaflet map
+        const map = L.map('map').setView([43.72, 10.40], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        const markers = {};
+        let selectedSensorId = null;
+
+        const mapLoadingOverlay = document.getElementById('map-loading-overlay');
+        const sidebarLoading = document.getElementById('sidebar-loading');
+        const sensorListDiv = document.getElementById('sensor-list');
+
+        /**
+         * Generates an SVG icon based on sensor status.
+         * @param {string} status - The status of the sensor (NORMAL or ANOMALY).
+         * @returns {string} HTML string for the SVG icon.
+         */
+        function getSensorSvgIcon(status) {
+            const fillColor = status === 'ANOMALY' ? '#F44336' : '#4CAF50'; // Red for anomaly, Green for normal
+            return `
+                <div class="sensor-icon-wrapper status-${status}">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width="24px" height="24px">
+                        <circle cx="12" cy="12" r="8"/>
+                    </svg>
+                </div>
+            `;
+        }
+
+        /**
+         * Creates or updates a marker on the map for a given sensor.
+         * @param {Object} sensor - The sensor data.
+         */
+        function updateMarker(sensor) {
+            const lat = sensor.location.lat;
+            const lon = sensor.location.lon;
+            const status = sensor.status || 'UNKNOWN';
+            const iconHtml = getSensorSvgIcon(status);
+
+            // Create a custom DivIcon
+            const customIcon = L.divIcon({
+                className: 'leaflet-div-icon',
+                html: iconHtml,
+                iconSize: [36, 36],
+                iconAnchor: [18, 18],
+                popupAnchor: [0, -20]
+            });
+
+            if (markers[sensor.id]) {
+                // Update existing marker's position and icon
+                markers[sensor.id].setLatLng([lat, lon]).setIcon(customIcon);
+            } else {
+                // Create new marker
+                markers[sensor.id] = L.marker([lat, lon], { icon: customIcon }).addTo(map);
+                markers[sensor.id].on('click', () => {
+                    selectSensor(sensor.id);
+                    map.flyTo([lat, lon], map.getZoom());
+                });
+            }
+            // Update popup content
+            markers[sensor.id].bindPopup(`
+                <div class="popup-content">
+                    <h4>Sensor ${sensor.id}</h4>
+                    <p>Status: <span class="status-${status}">${status}</span></p>
+                    <p>Value: ${sensor.last_value ? parseFloat(sensor.last_value).toFixed(2) : 'N/A'}</p>
+                    <p class="last-updated">Last Updated: ${sensor.timestamp ? new Date(sensor.timestamp * 1000).toLocaleTimeString() : 'N/A'}</p>
+                </div>
+            `);
+        }
+
+        /**
+         * Updates the sensor list in the sidebar.
+         * @param {Array<Object>} sensors - Array of sensor data.
+         */
+        function updateSensorList(sensors) {
+            sensorListDiv.innerHTML = '';
+            if (sensors.length === 0) {
+                sensorListDiv.innerHTML = '<p class="text-gray-600">No sensors found.</p>';
+                return;
+            }
+
+            sensors.sort((a, b) => {
+                if (a.status === 'ANOMALY' && b.status !== 'ANOMALY') return -1;
+                if (a.status !== 'ANOMALY' && b.status === 'ANOMALY') return 1;
+                return a.id.localeCompare(b.id);
+            });
+
+            sensors.forEach(sensor => {
+                const statusClass = sensor.status === 'ANOMALY' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800';
+                const listItem = document.createElement('div');
+                listItem.id = `sensor-item-${sensor.id}`;
+                listItem.className = `flex items-center justify-between p-4 rounded-lg shadow-sm cursor-pointer transition-all duration-200 ease-in-out ${statusClass}`;
+                if (sensor.id === selectedSensorId) {
+                    listItem.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2', 'ring-offset-white');
+                }
+
+                listItem.innerHTML = `
+                    <div class="flex-grow">
+                        <p class="font-semibold text-lg">${sensor.id}</p>
+                        <p class="text-sm">Value: <span class="font-medium">${sensor.last_value ? parseFloat(sensor.last_value).toFixed(2) : 'N/A'}</span></p>
+                        <p class="text-sm">Status: <span class="font-medium">${sensor.status || 'N/A'}</span></p>
+                    </div>
+                    <div class="w-6 h-6 rounded-full ${sensor.status === 'ANOMALY' ? 'bg-red-500' : 'bg-green-500'} flex items-center justify-center text-white text-xs font-bold">
+                        ${sensor.status === 'ANOMALY' ? '!' : '✓'}
+                    </div>
+                `;
+                listItem.addEventListener('click', () => {
+                    selectSensor(sensor.id);
+                    // Find the marker and pan to it, then open its popup
+                    if (markers[sensor.id]) {
+                        map.flyTo(markers[sensor.id].getLatLng(), map.getZoom() < 13 ? 13 : map.getZoom());
+                        markers[sensor.id].openPopup();
+                    }
+                });
+                sensorListDiv.appendChild(listItem);
+            });
+            sidebarLoading.style.display = 'none';
+        }
+
+        /**
+         * Highlights a sensor in the sidebar and updates the selectedSensorId.
+         * @param {string} sensorId - The ID of the sensor to select.
+         */
+        function selectSensor(sensorId) {
+
+            if (selectedSensorId) {
+                const prevItem = document.getElementById(`sensor-item-${selectedSensorId}`);
+                if (prevItem) {
+                    prevItem.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2', 'ring-offset-white');
+                }
+            }
+
+            selectedSensorId = sensorId;
+            const currentItem = document.getElementById(`sensor-item-${selectedSensorId}`);
+            if (currentItem) {
+                currentItem.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2', 'ring-offset-white');
+                currentItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        // 1. Initial load of all sensors
+        fetch('/api/sensors')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to fetch initial sensor data.');
+                }
+                return response.json();
+            })
+            .then(sensors => {
+                sensors.forEach(sensor => updateMarker(sensor));
+                updateSensorList(sensors);
+                mapLoadingOverlay.style.opacity = '0';
+                mapLoadingOverlay.style.pointerEvents = 'none';
+            })
+            .catch(error => {
+                console.error('Error during initial sensor data load:', error);
+                mapLoadingOverlay.innerHTML = '<p class="text-red-600 text-xl">Error loading map data.</p><p class="text-red-500">Please check your server connection.</p>';
+                sidebarLoading.innerHTML = '<p class="text-red-600">Error loading sensor list.</p>';
+            });
+
+        // 2. Listen for real-time updates via WebSocket
+        const socket = io();
+        socket.on('connect', () => {
+            console.log('Connected to WebSocket server.');
+            mapLoadingOverlay.style.opacity = '0';
+            mapLoadingOverlay.style.pointerEvents = 'none';
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from WebSocket server. Reconnecting...');
+            mapLoadingOverlay.style.opacity = '1';
+            mapLoadingOverlay.style.pointerEvents = 'auto';
+            mapLoadingOverlay.innerHTML = '<p class="text-red-600 text-xl">Disconnected. Attempting to reconnect...</p>';
+        });
+
+        socket.on('sensor_update', (data) => {
+            const updatedSensor = JSON.parse(data);
+            console.log('Sensor update received!', updatedSensor);
+
+            // Update the marker on the map
+            updateMarker(updatedSensor);
+
+
+            fetch('/api/sensors')
+                .then(response => response.json())
+                .then(sensors => {
+                    updateSensorList(sensors);
+                })
+                .catch(error => {
+                    console.error('Error fetching sensors for sidebar update:', error);
+                });
+        });
+    </script>
+</body>
+
+</html>
