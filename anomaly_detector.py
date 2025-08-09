@@ -30,7 +30,7 @@ def process_stream():
             for entry_id, data in entries:
                 sensor_id = data['sensor_id']
                 value = float(data['value'])
-                ts = int(time.time())
+                ts = int(time.time() * 1000)
 
                 # Determine new status
                 status = "ANOMALY" if value > ANOMALY_THRESHOLD else "NORMAL"

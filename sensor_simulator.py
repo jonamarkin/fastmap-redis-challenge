@@ -36,8 +36,8 @@ def run_sensors():
         sensor_id = sensor["id"]
 
         reading = {
-            "value": round(random.uniform(100.0, 105.0) + (random.random() > 0.98) * 20, 2),
-            "timestamp": int(time.time())
+            "value": round(random.uniform(100.0, 105.0) + (random.random() > 0.90) * 20, 2),
+            "timestamp": int(time.time() * 1000)
         }
         
         # XADD adds the reading to the stream 'raw_sensor_data'
