@@ -31,7 +31,7 @@ def setup_sensors():
 def run_sensors():
     """Continuously generate data for a random sensor and add it to a stream."""
     while True:
-        # Choose a random sensor from our list to simulate a reading
+        # Choose a random sensor from the list
         sensor = random.choice(SENSORS)
         sensor_id = sensor["id"]
 
